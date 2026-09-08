@@ -110,6 +110,18 @@ export const env = {
   get cronSecret() {
     return optional("CRON_SECRET");
   },
+  /**
+   * Release identifier stamped in by the deploy script, surfaced on
+   * /api/health so you can see which build is actually serving.
+   *
+   * Read through `optional()` deliberately: it indexes `process.env` with a
+   * variable, which Next cannot statically analyse. A literal
+   * `process.env.WEZO_RELEASE` is inlined at build time — and since the value
+   * only exists at run time, that would bake in `undefined` for ever.
+   */
+  get releaseId() {
+    return optional("WEZO_RELEASE");
+  },
   get isProduction() {
     return process.env.NODE_ENV === "production";
   },

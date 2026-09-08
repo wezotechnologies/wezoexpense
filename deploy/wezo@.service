@@ -1,0 +1,65 @@
+# Wezo Expense Tracker — templated systemd unit.
+#
+# One instance per colour: wezo@blue (port 3001) and wezo@green (port 3002).
+# Both run `next start` from their own symlink, so a deploy can build and boot
+# the idle colour while the live one keeps serving. deploy/deploy.sh switches
+# nginx between them once the new one passes its health check.
+#
+#   systemctl start wezo@blue
+#   systemctl status wezo@green
+#   journalctl -u wezo@blue -f
+
+[Unit]
+Description=Wezo Expense Tracker (%i)
+Documentation=https://github.com/wezotechnologies/wezoexpense
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wezo
+Group=wezo
+
+# /opt/wezo/{blue,green} are symlinks into releases/, swung by the deploy script.
+WorkingDirectory=/opt/wezo/%i
+
+# Shared secrets, then the per-colour PORT. Order matters: the colour file wins.
+EnvironmentFile=/opt/wezo/shared/.env
+EnvironmentFile=/opt/wezo/shared/%i.env
+Environment=NODE_ENV=production
+# Bind to loopback only — nginx is the only thing that should reach it.
+Environment=HOSTNAME=127.0.0.1
+
+ExecStart=/usr/bin/npm start
+
+# Give the app a moment to drain in-flight requests before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=2
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wezo-%i
+
+# ---- hardening -----------------------------------------------------------
+# The app needs to read its release directory and write nothing except, on the
+# local-storage fallback, .localblob — which is not used in production.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+# Next writes a small amount of cache under .next; allow just the release tree.
+ReadWritePaths=/opt/wezo/releases
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

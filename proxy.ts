@@ -41,9 +41,13 @@ export function proxy(request: NextRequest) {
   // secret rather than a session cookie, so bouncing it here would make the
   // endpoint unreachable to the only caller it exists for. The route does its
   // own authentication (shared secret, or an admin session for a manual run).
+  // /api/health is also exempt: the deploy script polls it on the new release
+  // before any traffic is switched to it, so it must answer without a session.
+  // It returns only whether each dependency responds — never any data.
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/cron/") ||
+    pathname === "/api/health" ||
     pathname.startsWith("/icons/") ||
     PUBLIC_PATHS.includes(pathname)
   ) {

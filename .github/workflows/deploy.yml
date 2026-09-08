@@ -1,0 +1,190 @@
+name: CI / Deploy
+
+# Push to main -> verify -> build -> ship to the VM -> blue/green switch.
+# Pull requests run the verify job only; they never deploy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: "Build and verify only, do not deploy"
+        type: boolean
+        default: false
+
+# One deploy at a time. A newer push waits rather than racing an in-flight
+# release onto the same VM — but is not cancelled, because cancelling
+# mid-switch could leave nginx pointing at a half-started colour.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # -------------------------------------------------------------------------
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` triggers postinstall -> prisma generate, which needs the
+      # schema but not a database.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # The pure-logic suite needs no server and no database: IST/UTC
+      # boundaries, Decimal money, the VAT rules, defensive AI parsing.
+      # The HTTP suites are deliberately not run here — they mutate data and
+      # would bill a real AI call.
+      - name: Verify business logic
+        run: npm run verify:logic
+
+      - name: Build
+        run: npm run build
+        env:
+          # The build must not need real secrets. These are placeholders that
+          # satisfy module-load-time validation only; nothing is contacted.
+          DATABASE_URL: postgresql://placeholder@localhost:5432/placeholder
+          AUTH_SECRET: build-time-placeholder-not-a-real-secret
+
+      # Ship a self-contained bundle so the VM never runs a build. Production
+      # dependencies are installed here, in a clean environment.
+      - name: Prune to production dependencies
+        run: npm ci --omit=dev
+        env:
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "1"
+
+      # `npm ci --omit=dev` wipes node_modules, taking the generated Prisma
+      # client with it. Regenerate against the production tree.
+      - name: Regenerate Prisma client
+        run: npx prisma generate
+
+      - name: Package the release
+        run: |
+          tar -czf release.tar.gz \
+            .next \
+            public \
+            generated \
+            prisma \
+            node_modules \
+            package.json \
+            package-lock.json \
+            prisma.config.ts \
+            next.config.ts
+          ls -lh release.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release.tar.gz
+          retention-days: 7
+
+  # -------------------------------------------------------------------------
+  deploy:
+    name: Deploy
+    needs: verify
+    runs-on: ubuntu-latest
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      inputs.skip_deploy != true
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_URL || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key on first contact and reuse it thereafter, so a
+          # deploy cannot be silently redirected to another machine.
+          if [ -n "${{ secrets.DEPLOY_HOST_KEY }}" ]; then
+            printf '%s\n' "${{ secrets.DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+            echo "::warning::DEPLOY_HOST_KEY is not set; the host key was accepted on trust. Add it as a secret to pin it."
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload and switch
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes"
+          TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
+          # Release id: sortable timestamp + short SHA, so `ls -t` order and
+          # git provenance agree.
+          RELEASE="$(date -u +%Y-%m-%dT%H-%M-%S)-${GITHUB_SHA::7}"
+          REMOTE="/opt/wezo/releases/${RELEASE}"
+
+          echo "::group::Uploading ${RELEASE}"
+          $SSH "$TARGET" "mkdir -p '${REMOTE}'"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            release.tar.gz "$TARGET:${REMOTE}/release.tar.gz"
+          $SSH "$TARGET" "tar -xzf '${REMOTE}/release.tar.gz' -C '${REMOTE}' && rm '${REMOTE}/release.tar.gz'"
+          # Record which commit this release is, for /api/health and for humans.
+          $SSH "$TARGET" "printf 'WEZO_RELEASE=%s\n' '${RELEASE}' > '${REMOTE}/.release'"
+          echo "::endgroup::"
+
+          echo "::group::Blue/green switch"
+          # Always run the deploy script from the repo, not from the release,
+          # so a fix to the script takes effect on the very next deploy.
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            deploy/deploy.sh "$TARGET:/tmp/wezo-deploy.sh"
+          $SSH "$TARGET" "chmod +x /tmp/wezo-deploy.sh && /tmp/wezo-deploy.sh '${REMOTE}'"
+          echo "::endgroup::"
+
+      - name: Confirm the deployed release is serving
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "curl -fsS http://127.0.0.1/api/health | jq -e '.ready == true'" \
+            && echo "Live and healthy."
+
+      - name: Roll back on failure
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          echo "::error::Deploy failed — attempting rollback to the previous colour."
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            deploy/rollback.sh "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/wezo-rollback.sh" || exit 0
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "chmod +x /tmp/wezo-rollback.sh && /tmp/wezo-rollback.sh" || true

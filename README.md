@@ -120,6 +120,30 @@ payment method, so this is a cost choice, not an accuracy one.
 
 ---
 
+## Deploying
+
+The app needs a Node process — it is **not** a static site (47 of its 50 routes
+are server-rendered on demand, plus 26 API routes, a Node-runtime proxy, a
+Prisma pool and native dependencies). Azure Static Web Apps cannot host it.
+
+Zero-downtime blue/green deploys to an Ubuntu VM, driven by GitHub Actions, are
+set up in [`deploy/`](deploy/README.md):
+
+```
+nginx  ->  upstream wezo_app  ->  wezo@blue :3001  |  wezo@green :3002
+```
+
+CI builds and gates on the logic suite, ships a tarball, starts the **idle**
+colour, polls `/api/health` until the database answers, then *reloads* nginx
+onto it. The live colour is untouched until that gate passes, and stays on disk
+as an instant rollback target.
+
+[`deploy/README.md`](deploy/README.md) covers the one-time VM setup, the GitHub
+secrets CI needs, TLS, the cron entry for recurring transactions, and the rule
+for destructive migrations.
+
+---
+
 ## Production (Azure) — current state
 
 The Azure resources are provisioned and the schema is live.
