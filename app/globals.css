@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Wezo design system (spec 4)
+
+   Dark-mode-first, monochrome base. The accent is NOT the placeholder white
+   from the spec: wezo.co's live stylesheet uses a lime gradient
+   (#CCFD7D -> #CDDF7A -> #ABCC15) with black text on it (`button{color:black}`),
+   so per spec 4's instruction we use the real brand accent and keep black as
+   its contrast colour. #CDDF7A on #000 measures 14.4:1.
+
+   Theme strategy is class-based (`.light` on <html>), not media-query, because
+   dark must be the default and the choice is remembered per user.
+--------------------------------------------------------------------------- */
+
+@custom-variant light (&:where(.light, .light *));
+
+:root {
+  /* Core palette — dark (default) */
+  --bg: #000000;
+  --surface: #0f0f0f;
+  --surface-2: #1a1a1a;
+  --border: #262626;
+  --text: #fafafa;
+  --text-muted: #a1a1a1;
+
+  /* Wezo brand accent, read from the live site */
+  --accent: #cddf7a;
+  --accent-strong: #abcc15;
+  --accent-bright: #ccfd7d;
+  --accent-contrast: #000000;
+  --accent-soft: rgb(205 223 122 / 0.12);
+
+  /* Functional finance colours — status/semantics only */
+  --income: #22c55e;
+  --expense: #ef4444;
+  --pending: #f59e0b;
+  --approved: #22c55e;
+  --rejected: #ef4444;
+  --info: #3b82f6;
+
+  --ring: #cddf7a;
+  color-scheme: dark;
+
+  /* ---- Chart palette (validated, dark steps) --------------------------
+     Series colours are separate from the status colours above. The status
+     greens/reds are single colours judged against a surface; chart marks must
+     be told apart from each other, which is a stricter test.
+
+     Validated with the data-viz six-check validator against surface #0F0F0F:
+     categorical 1-8 pass every gate on the adjacent pairlist (worst CVD
+     ΔE 8.4, worst normal-vision ΔE 19.3).
+
+     --flow-in / --flow-out are the money-in/money-out pair. They sit in the
+     6-8 CVD band (ΔE 6.9 deutan), which is permitted ONLY with secondary
+     encoding — so every chart using them ships a legend, direct value labels
+     and a gap between marks, and never relies on hue alone.
+  --------------------------------------------------------------------- */
+  --flow-in: #1baf7a;
+  --flow-out: #e34948;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --grid: #262626;
+}
+
+:root.light {
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --surface-2: #f4f4f5;
+  --border: #e4e4e7;
+  --text: #0a0a0a;
+  --text-muted: #52525b;
+
+  /* Lime is very light; on white the darker end of the brand gradient reads. */
+  --accent: #7d9c07;
+  --accent-strong: #637a05;
+  --accent-bright: #abcc15;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(125 156 7 / 0.1);
+
+  --income: #15803d;
+  --expense: #b91c1c;
+  --pending: #b45309;
+  --approved: #15803d;
+  --rejected: #b91c1c;
+  --info: #1d4ed8;
+
+  --ring: #7d9c07;
+  color-scheme: light;
+
+  /* Light steps of the same palette, validated against surface #FAFAFA.
+     Three slots sit below 3:1 on white, so the relief rule applies: every
+     chart here also shows its numbers as text (legend values, direct labels
+     or the table beneath it), never colour alone. */
+  --flow-in: #1baf7a;
+  --flow-out: #e34948;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --grid: #e4e4e7;
+}
+
+@theme inline {
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-ink-muted: var(--text-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+  --color-pending: var(--pending);
+  --color-approved: var(--approved);
+  --color-rejected: var(--rejected);
+  --color-info: var(--info);
+
+  --font-sans: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+
+  --radius-lg: 0.625rem;
+}
+
+/* ------------------------------- base ----------------------------------
+   These element defaults MUST live in `@layer base`. Unlayered CSS wins over
+   every cascade layer, so a bare `button { color: inherit }` would silently
+   beat Tailwind's `@layer utilities` and break every text-colour utility on
+   buttons (`text-accent-contrast`, `text-white` on a danger button, and so on).
+   Inside `@layer base` the intended order — base < components < utilities —
+   is restored.
+------------------------------------------------------------------------- */
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Respect the iOS home-indicator / notch in standalone PWA mode. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Native controls should inherit our type, but NOT our colour — a colour
+     reset here would fight the utilities that give buttons their text colour. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+/* Visible, brand-coloured focus for keyboard users (spec 17 accessibility). */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Numeric columns line up in tables and money fields. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* Slim, unobtrusive scrollbars that follow the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Native controls (date pickers, selects) should match the theme. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.55);
+  cursor: pointer;
+}
+.light input[type="date"]::-webkit-calendar-picker-indicator,
+.light input[type="month"]::-webkit-calendar-picker-indicator {
+  filter: opacity(0.55);
+}
+
+/* Hide number-input spinners; amounts are typed, not nudged. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Recharts inherits our type and drops its default white surfaces. */
+.recharts-wrapper,
+.recharts-surface {
+  overflow: visible;
+}
+.recharts-cartesian-axis-tick-value {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+.recharts-text {
+  fill: var(--text-muted);
+}

@@ -1,0 +1,312 @@
+// Wezo Expense & Income Tracker — Prisma schema
+// Spec: Section 6 (data model). INR is the single source of truth for the books.
+//
+// Prisma 7 notes:
+//  - `prisma-client` generator requires an explicit `output`; client is NOT in node_modules.
+//  - `datasource.url` lives in prisma.config.ts, not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Users & roles
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  EMPLOYEE
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  name               String
+  email              String   @unique
+  passwordHash       String
+  role               Role     @default(EMPLOYEE)
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
+  themePref          String?  // "dark" | "light" — remembered per user (spec 4)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  transactions  Transaction[]   @relation("createdBy")
+  reviewedTxns  Transaction[]   @relation("reviewedBy")
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  periodLocks   PeriodLock[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Classification directories
+// ---------------------------------------------------------------------------
+
+enum TxnType {
+  INCOME
+  EXPENSE
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  type     TxnType // a category belongs to one side of the books
+  isSystem Boolean @default(false) // seeded defaults
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([name, type])
+  @@index([type, isActive])
+}
+
+enum VendorKind {
+  CLIENT
+  VENDOR
+}
+
+model Vendor {
+  id       String     @id @default(cuid())
+  name     String     @unique
+  kind     VendorKind @default(VENDOR)
+  notes    String?
+  isActive Boolean    @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+  projects     Project[]
+
+  @@index([kind, isActive])
+}
+
+model Project {
+  id       String  @id @default(cuid())
+  name     String
+  clientId String?
+  client   Vendor? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@index([clientId])
+}
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+enum TxnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// DIRECT      = client paid Wezo India directly.
+/// VIA_DUBAI_PARTNER = collected in Dubai by the partner, who handles VAT and
+/// remits only the net amount. Only the net INR received is booked as income.
+enum Routing {
+  DIRECT
+  VIA_DUBAI_PARTNER
+}
+
+model Transaction {
+  id     String    @id @default(cuid())
+  type   TxnType
+  status TxnStatus @default(PENDING)
+  date   DateTime // date money actually moved (bank credit/debit)
+
+  // Money — amountInr is the source of truth and the only figure in reports.
+  amountInr        Decimal  @db.Decimal(14, 2)
+  originalCurrency String? // USD / CAD / AED / INR ... (informational)
+  originalAmount   Decimal? @db.Decimal(14, 2)
+  fxRate           Decimal? @db.Decimal(14, 6) // derived: amountInr / originalAmount
+
+  // Classification
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  vendorId      String?
+  vendor        Vendor?   @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  projectId     String?
+  project       Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  paymentLabel  String? // "Advance", "1st payment", "Milestone 3", "Final"
+  paymentMethod String? // UPI / Bank / Card / Cash / PayPal
+  notes         String?
+
+  // VAT / Dubai-partner routing (income). Gross + VAT are informational only:
+  // they are never counted as Wezo India revenue.
+  routing       Routing  @default(DIRECT)
+  grossAmount   Decimal? @db.Decimal(14, 2)
+  grossCurrency String?
+  vatAmount     Decimal? @db.Decimal(14, 2)
+  vatCurrency   String?
+
+  // Expense tax (informational)
+  taxAmount Decimal? @db.Decimal(14, 2)
+
+  // Receipt / proof — private Azure blob, served only via short-lived SAS.
+  receiptBlobKey String?
+  receiptMime    String?
+
+  // AI provenance
+  aiExtracted  Boolean @default(false)
+  aiConfidence Float? // 0..1 overall
+  aiRaw        Json? // full model output, kept for audit
+
+  // Workflow / audit
+  createdById     String
+  createdBy       User           @relation("createdBy", fields: [createdById], references: [id])
+  reviewedById    String?
+  reviewedBy      User?          @relation("reviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  rejectionReason String?
+  recurringId     String?
+  recurring       RecurringRule? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+  periodLocked    Boolean        @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete
+
+  @@index([deletedAt, date])
+  @@index([type, status])
+  @@index([status])
+  @@index([createdById])
+  @@index([categoryId])
+  @@index([vendorId])
+  @@index([projectId])
+  @@index([date])
+  @@index([routing])
+}
+
+// ---------------------------------------------------------------------------
+// Recurring, budgets, period locks
+// ---------------------------------------------------------------------------
+
+enum Frequency {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model RecurringRule {
+  id           String    @id @default(cuid())
+  name         String
+  type         TxnType
+  templateJson Json // amount, category, vendor, notes, etc.
+  frequency    Frequency
+  nextRunDate  DateTime
+  isActive     Boolean   @default(true)
+  autoApprove  Boolean   @default(false)
+  lastRunAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@index([isActive, nextRunDate])
+}
+
+model Budget {
+  id         String    @id @default(cuid())
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  month      String // "2026-09"
+  amountInr  Decimal   @db.Decimal(14, 2)
+  alertPct   Int       @default(80) // notify at X% of budget
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, month])
+  @@index([month])
+}
+
+model PeriodLock {
+  id         String   @id @default(cuid())
+  month      String   @unique // "2026-09"
+  lockedById String
+  lockedBy   User     @relation(fields: [lockedById], references: [id])
+  lockedAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Audit & notifications
+// ---------------------------------------------------------------------------
+
+/// Append-only. Never updated or deleted (spec 14).
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id])
+  action    String // CREATE_TXN, APPROVE_TXN, EDIT_TXN, DELETE_TXN, ADD_USER, CHANGE_ROLE, LOCK_PERIOD...
+  entity    String // "Transaction", "User"...
+  entityId  String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([action])
+}
+
+enum NotificationKind {
+  SUBMISSION_PENDING
+  SUBMISSION_APPROVED
+  SUBMISSION_REJECTED
+  BUDGET_THRESHOLD
+  PERIOD_LOCKED
+  SYSTEM
+}
+
+model Notification {
+  id       String           @id @default(cuid())
+  userId   String
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind     NotificationKind
+  title    String
+  body     String?
+  link     String?
+  readAt   DateTime?
+  createdAt DateTime        @default(now())
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Settings (single row)
+// ---------------------------------------------------------------------------
+
+model AppSetting {
+  id                   String  @id @default("singleton")
+  baseCurrency         String  @default("INR")
+  aiModel              String  @default("gpt-4o-mini")
+  aiMonthlySpendCapUsd Float   @default(10)
+  aiSpendThisMonthUsd  Float   @default(0)
+  aiSpendMonth         String  @default("") // "2026-09" — resets the running total
+  approvalRequired     Boolean @default(true)
+  vatEnabled           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
