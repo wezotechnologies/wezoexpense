@@ -56,6 +56,10 @@ Deploy destructive changes as two releases:
 | 1 | add the new column, backfill it | write to both, read the old |
 | 2 | drop the old column | read the new |
 
+> **New to this?** [`WALKTHROUGH.md`](WALKTHROUGH.md) is the same setup written
+> as numbered steps with a check after each one, including the SiteGround DNS
+> record and the Azure firewall screens. Start there; this file is the reference.
+
 ---
 
 ## One-time VM setup
@@ -83,7 +87,7 @@ DATABASE_URL="postgresql://wezoexpcalc:<URL-ENCODED-PASSWORD>@wezoexpcalc.postgr
 
 AUTH_SECRET="<openssl rand -base64 32>"
 NEXTAUTH_SECRET="<same value>"
-NEXTAUTH_URL="https://expenses.wezo.co"     # the public URL, with scheme
+NEXTAUTH_URL="https://expense.wezo.co"     # the public URL, with scheme
 
 OPENAI_API_KEY="sk-proj-..."                 # either or both providers
 ANTHROPIC_API_KEY="sk-ant-..."
@@ -150,9 +154,9 @@ sudo -u wezo npm run db:seed
 Point an A record at the VM, then:
 
 ```bash
-sudo sed -i 's/server_name _;/server_name expenses.wezo.co;/' /etc/nginx/sites-available/wezo.conf
+sudo sed -i 's/server_name _;/server_name expense.wezo.co;/' /etc/nginx/sites-available/wezo.conf
 sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d expenses.wezo.co
+sudo certbot --nginx -d expense.wezo.co
 ```
 
 certbot adds the TLS server block and the HTTP redirect, and installs a renewal

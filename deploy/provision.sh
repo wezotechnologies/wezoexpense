@@ -186,7 +186,7 @@ Next steps (details in deploy/README.md):
 
   4. Point DNS at this VM, then enable TLS:
        sudo apt-get install -y certbot python3-certbot-nginx
-       sudo certbot --nginx -d expenses.wezo.co
+       sudo certbot --nginx -d expense.wezo.co
 
   5. Push to main. The workflow builds, gates on tests, and deploys.
 

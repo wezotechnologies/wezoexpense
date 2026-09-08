@@ -138,9 +138,11 @@ colour, polls `/api/health` until the database answers, then *reloads* nginx
 onto it. The live colour is untouched until that gate passes, and stays on disk
 as an instant rollback target.
 
-[`deploy/README.md`](deploy/README.md) covers the one-time VM setup, the GitHub
-secrets CI needs, TLS, the cron entry for recurring transactions, and the rule
-for destructive migrations.
+Two documents:
+- [`deploy/WALKTHROUGH.md`](deploy/WALKTHROUGH.md) — numbered steps from a bare
+  VM to `https://expense.wezo.co`, with a check after each one. Start here.
+- [`deploy/README.md`](deploy/README.md) — the reference: how the blue/green
+  switch works, what CI does, and the rule for destructive migrations.
 
 ---
 
