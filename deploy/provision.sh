@@ -94,6 +94,10 @@ if [[ ! -f "$APP_ROOT/active" ]]; then
   echo blue > "$APP_ROOT/active"
   chown "$APP_USER:$APP_USER" "$APP_ROOT/active"
 fi
+# 0664, not the umask's 0644: deploy.sh rewrites this on every switch, and the
+# deploy user is in the wezo group. At 0644 that write needs root, and it
+# happens after nginx has switched — the worst possible place to hit EACCES.
+chmod 0664 "$APP_ROOT/active"
 
 # ---------------------------------------------------------------------------
 log "Installing the systemd template unit"
@@ -141,7 +145,19 @@ log "Allowing the deploy user to manage just this app"
 # nothing else. Full sudo is not required.
 DEPLOY_USER="${SUDO_USER:-$(logname 2>/dev/null || echo azureuser)}"
 cat > /etc/sudoers.d/wezo-deploy <<EOF
-# Least-privilege deploy rights for ${DEPLOY_USER}
+# Least-privilege deploy rights for ${DEPLOY_USER}.
+#
+# On an Azure image the default admin already holds NOPASSWD:ALL from
+# cloud-init, so this rule grants nothing extra there. It exists so a deploy
+# user WITHOUT blanket sudo still works — which means it has to cover
+# everything deploy.sh actually calls through sudo, or the script fails
+# mid-switch on a locked-down host.
+
+# Act as the unprivileged service account: read the secrets file the way the app
+# does, and apply migrations as its owner. Broad, but strictly less privileged
+# than root — ${APP_USER} is a nologin account that owns only its own release tree.
+${DEPLOY_USER} ALL=(${APP_USER}) NOPASSWD: ALL
+
 ${DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl start wezo@blue.service, \\
   /bin/systemctl start wezo@green.service, \\
   /bin/systemctl stop wezo@blue.service, \\
@@ -155,8 +171,11 @@ ${DEPLOY_USER} ALL=(root) NOPASSWD: /bin/systemctl start wezo@blue.service, \\
   /usr/bin/tee /etc/nginx/conf.d/wezo-upstream.conf, \\
   /usr/bin/tee /opt/wezo/shared/blue.env, \\
   /usr/bin/tee /opt/wezo/shared/green.env, \\
+  /usr/bin/tee /opt/wezo/active, \\
   /bin/chown wezo\\:wezo /opt/wezo/shared/blue.env, \\
-  /bin/chown wezo\\:wezo /opt/wezo/shared/green.env
+  /bin/chown wezo\\:wezo /opt/wezo/shared/green.env, \\
+  /usr/bin/journalctl -u wezo@blue.service *, \\
+  /usr/bin/journalctl -u wezo@green.service *
 EOF
 chmod 0440 /etc/sudoers.d/wezo-deploy
 visudo -c -f /etc/sudoers.d/wezo-deploy

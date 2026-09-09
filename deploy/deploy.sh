@@ -46,8 +46,17 @@ die()  { printf '\n\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 # provision.sh creates this file empty on purpose, so refuse rather than start a
 # release that would boot without a database or an auth secret. Checked before
 # anything is linked or migrated: the live colour is untouched either way.
-[[ -s "$APP_ROOT/shared/.env" ]] || die "$APP_ROOT/shared/.env is missing or empty — fill it in (deploy/WALKTHROUGH.md, Part 5) and re-run the workflow. Nothing was changed."
-if grep -q '__DB_PASSWORD__' "$APP_ROOT/shared/.env" 2>/dev/null; then
+#
+# Both checks run AS THE SERVICE ACCOUNT, not as the deploy user. /opt/wezo/shared
+# is 0700 wezo, so an unprivileged `[[ -s ... ]]` here returns false for a
+# perfectly good file — reporting "missing or empty" for a secrets file that is
+# present and complete, which is unfalsifiable from the deploy log. Asking the
+# account that actually has to read it at runtime is both correct and a stronger
+# check: it fails if the file is empty *or* if the app could not read it.
+if ! sudo -u "$APP_USER" test -s "$APP_ROOT/shared/.env"; then
+  die "$APP_USER cannot read a non-empty $APP_ROOT/shared/.env — fill it in (deploy/WALKTHROUGH.md, Part 5). Nothing was changed."
+fi
+if sudo -u "$APP_USER" grep -q '__DB_PASSWORD__' "$APP_ROOT/shared/.env"; then
   die "$APP_ROOT/shared/.env still has the __DB_PASSWORD__ placeholder (WALKTHROUGH Part 5c). Nothing was changed."
 fi
 
@@ -66,7 +75,8 @@ ln -sfn "$RELEASE_DIR" "$APP_ROOT/$IDLE"
 # The app reads .env from its working directory as well as from systemd, so a
 # symlink keeps `npm run db:deploy` and any manual tsx script working too.
 ln -sfn "$APP_ROOT/shared/.env" "$RELEASE_DIR/.env"
-chown -h "$APP_USER:$APP_USER" "$APP_ROOT/$IDLE" "$RELEASE_DIR/.env" 2>/dev/null || true
+# Cosmetic — the symlinks work regardless of who owns them, so never block on it.
+sudo -n chown -h "$APP_USER:$APP_USER" "$APP_ROOT/$IDLE" "$RELEASE_DIR/.env" 2>/dev/null || true
 ok "$APP_ROOT/$IDLE -> $RELEASE_DIR"
 
 # ---------------------------------------------------------------------------
@@ -109,7 +119,7 @@ done
 
 if [[ $ready -ne 1 ]]; then
   printf '\n\033[1;31m  health check failed — last 40 log lines from %s:\033[0m\n' "$IDLE"
-  journalctl -u "wezo@${IDLE}.service" -n 40 --no-pager | sed 's/^/    /'
+  sudo journalctl -u "wezo@${IDLE}.service" -n 40 --no-pager | sed 's/^/    /'
   sudo systemctl stop "wezo@${IDLE}.service" || true
   die "aborting: $LIVE is untouched and still serving traffic"
 fi
@@ -140,7 +150,11 @@ fi
 
 # reload, not restart: existing connections are served to completion.
 sudo systemctl reload nginx
-echo "$IDLE" > "$APP_ROOT/active"
+# Written through sudo: `active` is 0644 wezo:wezo, so a plain redirect from the
+# deploy user fails with EACCES — and it fails *here*, after nginx has already
+# switched, which would report a red deploy and fire a rollback over a release
+# that is serving perfectly well.
+printf '%s\n' "$IDLE" | sudo tee "$APP_ROOT/active" >/dev/null
 ok "traffic now on $IDLE"
 
 # ---------------------------------------------------------------------------
