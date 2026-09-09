@@ -83,7 +83,7 @@ sudo -u wezo nano /opt/wezo/shared/.env
 ```
 
 ```bash
-DATABASE_URL="postgresql://wezoexpcalc:<URL-ENCODED-PASSWORD>@wezoexpcalc.postgres.database.azure.com:5432/wezo_expenses?sslmode=require"
+DATABASE_URL="postgresql://wezoexpcalc:<URL-ENCODED-PASSWORD>@wezoexpcalc.postgres.database.azure.com:5432/wezo_expenses?sslmode=verify-full"
 
 AUTH_SECRET="<openssl rand -base64 32>"
 NEXTAUTH_SECRET="<same value>"

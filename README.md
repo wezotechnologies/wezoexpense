@@ -161,7 +161,7 @@ repository**; take it from the Azure Portal or your secret store and URL-encode
 it (`@` becomes `%40`, `#` becomes `%23`):
 
 ```
-DATABASE_URL="postgresql://wezoexpcalc:<URL-ENCODED-PASSWORD>@wezoexpcalc.postgres.database.azure.com:5432/wezo_expenses?sslmode=require"
+DATABASE_URL="postgresql://wezoexpcalc:<URL-ENCODED-PASSWORD>@wezoexpcalc.postgres.database.azure.com:5432/wezo_expenses?sslmode=verify-full"
 ```
 
 A quick way to encode it without pasting it into a shell history:
@@ -170,11 +170,21 @@ A quick way to encode it without pasting it into a shell history:
 node -p 'encodeURIComponent(process.env.PW)'   # with PW exported beforehand
 ```
 
-**Transport security is verified, not assumed.** `sslmode=require` is passed to
-node-postgres, which treats it as `verify-full` — stricter than libpq's `require`,
-because it also validates the server certificate. The live session reports
-`ssl=true, TLSv1.3, TLS_AES_256_GCM_SHA384`, and a deliberately unencrypted
-connection is refused by the server (`no pg_hba.conf entry ... no encryption`).
+**Transport security is verified, not assumed — and asked for explicitly.**
+`sslmode=verify-full` makes node-postgres validate the server certificate and
+the hostname. It is spelled out rather than left as `sslmode=require`, which
+node-postgres currently treats as an alias for `verify-full` but warns it will
+reinterpret with libpq's weaker semantics in pg v9 — at which point a URL
+saying `require` would quietly stop verifying anything. The live session
+reports `ssl=true, TLSv1.3, TLS_AES_256_GCM_SHA384`, and a deliberately
+unencrypted connection is refused by the server (`no pg_hba.conf entry ... no
+encryption`).
+
+`verify-full` is right for the *application*, which uses node-postgres and its
+bundled CA set. A `psql` smoke test should keep `sslmode=require`: libpq looks
+for a CA at `~/.postgresql/root.crt` rather than the system trust store, so
+`verify-full` there fails on a missing file rather than on a real trust
+problem.
 
 **Two things to tighten before real use:**
 

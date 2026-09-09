@@ -59,7 +59,14 @@ LockPersonality=yes
 MemoryDenyWriteExecute=no
 # Next writes a small amount of cache under .next; allow just the release tree.
 ReadWritePaths=/opt/wezo/releases
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is required, not optional. Next enumerates network interfaces on
+# 'listening' to print its startup banner; that goes through getifaddrs(), which
+# on Linux queries the kernel over a netlink socket. Without AF_NETLINK the
+# socket() call returns EAFNOSUPPORT — surfacing as Node's opaque
+# "uv_interface_addresses returned Unknown system error 97" — and because it
+# arrives as an unhandled rejection the process exits. With Restart=always that
+# is a crash loop, and the deploy's health gate never opens.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target
