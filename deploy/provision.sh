@@ -10,7 +10,7 @@
 # Idempotent — safe to re-run.
 #
 # What it sets up:
-#   * Node.js 20 LTS (Next 16 requires >= 20.9)
+#   * Node.js 22 LTS (the Azure SDK, openai and unpdf all declare >= 22)
 #   * a dedicated unprivileged `wezo` service account that owns the app
 #   * /opt/wezo blue/green release layout
 #   * two systemd services (blue on 3001, green on 3002)
@@ -25,7 +25,7 @@ set -euo pipefail
 
 APP_USER="wezo"
 APP_ROOT="/opt/wezo"
-NODE_MAJOR="20"
+NODE_MAJOR="22"
 BLUE_PORT="3001"
 GREEN_PORT="3002"
 
@@ -49,6 +49,8 @@ apt-get install -y --no-install-recommends \
 
 # ---------------------------------------------------------------------------
 log "Installing Node.js ${NODE_MAJOR}.x"
+# 22, not 20: @azure/*, openai and unpdf declare engines.node >= 22. They load on
+# 20, but relying on that is a latent runtime risk in code paths not yet hit.
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" -lt "$NODE_MAJOR" ]]; then
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \

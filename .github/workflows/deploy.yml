@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   # -------------------------------------------------------------------------
@@ -55,13 +55,13 @@ jobs:
       - name: Verify business logic
         run: npm run verify:logic
 
+      # No env is set here on purpose. The build needs no database URL and no
+      # auth secret: the Prisma client is constructed lazily and the Auth.js
+      # config is a function, so both are read on the first request rather than
+      # at import. If this step ever starts demanding a variable again, that is
+      # the regression to fix — do not paste a placeholder in.
       - name: Build
         run: npm run build
-        env:
-          # The build must not need real secrets. These are placeholders that
-          # satisfy module-load-time validation only; nothing is contacted.
-          DATABASE_URL: postgresql://placeholder@localhost:5432/placeholder
-          AUTH_SECRET: build-time-placeholder-not-a-real-secret
 
       # Ship a self-contained bundle so the VM never runs a build. Production
       # dependencies are installed here, in a clean environment.

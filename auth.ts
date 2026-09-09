@@ -14,6 +14,13 @@ import { verifyPassword } from "@/lib/passwords";
  * database on every protected request, so a role change or deactivation by the
  * Superadmin takes effect on the very next request rather than when the token
  * happens to refresh.
+ *
+ * The config is supplied as a *function*, which Auth.js evaluates per request
+ * rather than at import. That keeps `AUTH_SECRET` a runtime requirement: built
+ * eagerly, it became a build-time one, and `next build` then failed collecting
+ * /api/cron/recurring on any machine without a .env — CI included. The
+ * explicit error from lib/env is preserved; it simply fires when a request
+ * arrives instead of when the bundle is compiled.
  */
 
 const credentialsSchema = z.object({
@@ -21,7 +28,7 @@ const credentialsSchema = z.object({
   password: z.string().min(1),
 });
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   secret: env.authSecret,
   trustHost: true,
   session: {
@@ -86,4 +93,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
   },
-});
+}));
