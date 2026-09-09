@@ -170,15 +170,28 @@ chgrp "$APP_USER" "$APP_ROOT" "$APP_ROOT/releases"
 log "Provisioning complete"
 cat <<EOF
 
-Next steps (details in deploy/README.md):
+Next steps (numbered walkthrough in deploy/WALKTHROUGH.md, reference in
+deploy/README.md):
 
-  1. Write the secrets:
-       sudo -u ${APP_USER} nano ${APP_ROOT}/shared/.env
+  1. Write the secrets, if you have not already. This script creates
+     ${APP_ROOT}/shared/.env empty on a first run, and a deploy refuses to
+     run until it has content. Copy the file in rather
+     than pasting into an editor — a paste that is not saved leaves it
+     empty, and that only surfaces later in the deploy log:
+       # from your machine
+       scp <keyfile> prod.env ${DEPLOY_USER}@<this VM>:/tmp/wezo.env
+       # then here
+       sudo install -o ${APP_USER} -g ${APP_USER} -m 600 /tmp/wezo.env \\
+         ${APP_ROOT}/shared/.env && rm /tmp/wezo.env
      Must include DATABASE_URL, AUTH_SECRET, NEXTAUTH_URL,
      AZURE_STORAGE_CONNECTION_STRING, an AI key, CRON_SECRET.
+     Any password inside DATABASE_URL must be URL-encoded: an unencoded
+     '@' or ':' silently produces a different host.
 
-  2. Allow this VM through the Postgres firewall (Azure Portal), then check:
-       psql "\$DATABASE_URL" -c 'select 1'
+  2. Allow this VM through the Postgres firewall (Azure Portal), then prove
+     the connection string itself works — this is what the deploy's health
+     gate needs:
+       sudo -u ${APP_USER} bash -c 'set -a; . ${APP_ROOT}/shared/.env; set +a; psql "\$DATABASE_URL" -c "select current_database()"'
 
   3. Add these GitHub repository secrets so CI can deploy:
        DEPLOY_HOST=$(curl -fsS -H Metadata:true --noproxy '*' \
