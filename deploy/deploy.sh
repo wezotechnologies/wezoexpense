@@ -43,7 +43,13 @@ die()  { printf '\n\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 [[ -n "$RELEASE_DIR" ]] || die "usage: deploy.sh <release-dir>"
 [[ -d "$RELEASE_DIR" ]] || die "no such release: $RELEASE_DIR"
 [[ -d "$RELEASE_DIR/.next" ]] || die "release has no .next build: $RELEASE_DIR"
-[[ -s "$APP_ROOT/shared/.env" ]] || die "$APP_ROOT/shared/.env is missing or empty"
+# provision.sh creates this file empty on purpose, so refuse rather than start a
+# release that would boot without a database or an auth secret. Checked before
+# anything is linked or migrated: the live colour is untouched either way.
+[[ -s "$APP_ROOT/shared/.env" ]] || die "$APP_ROOT/shared/.env is missing or empty — fill it in (deploy/WALKTHROUGH.md, Part 5) and re-run the workflow. Nothing was changed."
+if grep -q '__DB_PASSWORD__' "$APP_ROOT/shared/.env" 2>/dev/null; then
+  die "$APP_ROOT/shared/.env still has the __DB_PASSWORD__ placeholder (WALKTHROUGH Part 5c). Nothing was changed."
+fi
 
 # ---------------------------------------------------------------------------
 # Work out which colour is live and which is therefore idle.

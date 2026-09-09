@@ -135,29 +135,73 @@ firewall rule hasn't taken effect — give it a minute and retry.
 
 ---
 
-## Part 5 — Write the secrets  🖥️ On the VM
+## Part 5 — Write the secrets  💻 + 🖥️
 
 The app reads its configuration from one file that only the service account can
-read. I generated the contents for you at `~/Desktop/wezo-vm-env.txt` on your
-Mac.
+read. `provision.sh` created that file **empty**, and the deploy refuses to run
+until it has content — so this part is not optional.
+
+I generated the contents for you at `~/Desktop/wezo-vm-env.txt` on your Mac.
+The database password is left as `__DB_PASSWORD__` and filled in on the VM in
+step 5c, so the real password never sits in a file on your laptop.
+
+> Copy the file rather than pasting it into an editor. A paste into `nano` that
+> looks fine but isn't saved leaves the file empty, and the failure only shows
+> up minutes later in the deploy log.
+
+### 5a. Copy it up  💻 On your Mac
 
 ```bash
-sudo -u wezo nano /opt/wezo/shared/.env
+scp -i ~/.ssh/wezo_deploy ~/Desktop/wezo-vm-env.txt \
+  azurewezoexpensecalc@VM_IP:/tmp/wezo.env
 ```
 
-Paste the whole contents of that file, then save with **Ctrl+O, Enter,
-Ctrl+X**.
+### 5b. Put it in place  🖥️ On the VM
 
-### Check it worked
+```bash
+sudo install -o wezo -g wezo -m 600 /tmp/wezo.env /opt/wezo/shared/.env
+rm /tmp/wezo.env
+```
+
+`install` sets the owner and the permissions as it copies, so there is never a
+moment where the file is readable by other accounts on the box. `600` means
+only the `wezo` account can read it.
+
+### 5c. Fill in the database password  🖥️ On the VM
+
+The password is URL-encoded first, because a connection string treats `@` and
+`:` as separators — an unencoded password containing either one silently
+produces a wrong host.
+
+```bash
+read -rsp 'Postgres password: ' PW; echo
+ENC=$(printf '%s' "$PW" | python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read(),safe=""))')
+sudo sed -i "s|__DB_PASSWORD__|$ENC|" /opt/wezo/shared/.env
+unset PW ENC
+```
+
+Reading the password at a prompt keeps it out of your shell history, and out of
+the terminal scrollback.
+
+### Check it worked  🖥️ On the VM
 
 ```bash
 sudo -u wezo test -s /opt/wezo/shared/.env && echo "file has content"
 sudo stat -c '%U %a %n' /opt/wezo/shared/.env    # want: wezo 600
+grep -c __DB_PASSWORD__ /opt/wezo/shared/.env    # want: 0
 ```
 
-`600` means only the `wezo` account can read it — not other users on the box.
+Then prove the connection string actually works — this is the same thing the
+deploy does, so a failure here saves you a round trip through CI:
 
-Then delete the copy on your Mac, since it contains live keys:
+```bash
+sudo -u wezo bash -c 'set -a; . /opt/wezo/shared/.env; set +a; psql "$DATABASE_URL" -c "select current_database()"'
+```
+
+You want `wezo_expenses`. If it hangs, this VM's IP is not in the Postgres
+firewall yet — go back to Part 4.
+
+Finally, delete the copy on your Mac, since it contains live keys:
 
 ```bash
 # 💻 On your Mac
