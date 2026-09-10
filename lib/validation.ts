@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { DATE_ONLY_RE, MONTH_KEY_RE } from "@/lib/dates";
+import { SALARY_BASIS_VALUES } from "@/lib/salary";
 
 /**
  * Shared Zod schemas for every API input (spec 12, 14).
@@ -376,6 +377,16 @@ export const projectUpdateSchema = z.object({
 /** The template a rule stamps out; a subset of the transaction fields. */
 export const recurringTemplateSchema = z.object({
   amountInr: money(),
+  /**
+   * Which working week this person is paid on, for the salary calculator.
+   *
+   * It lives on the rule because it is a fact about the employee's contract,
+   * not about one calculation — some staff are Mon–Sat and some Mon–Fri, and
+   * re-picking it every month is both tedious and a chance to get it wrong.
+   * Absent on rules that are not salaries, and on salaries set up before this
+   * existed, which is why it is optional rather than defaulted.
+   */
+  salaryBasis: z.enum(SALARY_BASIS_VALUES).nullish(),
   categoryId: optionalId,
   vendorId: optionalId,
   projectId: optionalId,
@@ -538,7 +549,7 @@ export const importCommitSchema = z.object({
 export const recordSalarySchema = z.object({
   monthlyInr: money(),
   month: monthKeySchema,
-  basis: z.enum(["calendar", "mon-sat", "mon-fri"]),
+  basis: z.enum(SALARY_BASIS_VALUES),
   /** Half-day units, so 23.5 days is exact rather than a float. */
   paidHalfDays: z.coerce.number().int().min(0).max(124),
   employeeName: trimmed(120).pipe(
@@ -551,3 +562,10 @@ export const recordSalarySchema = z.object({
   saveAsApproved: z.boolean().default(false),
 });
 export type RecordSalaryInput = z.infer<typeof recordSalarySchema>;
+
+/** Remembering a person's working week against their recurring rule. */
+export const setSalaryBasisSchema = z.object({
+  ruleId: idSchema,
+  basis: z.enum(SALARY_BASIS_VALUES),
+});
+export type SetSalaryBasisInput = z.infer<typeof setSalaryBasisSchema>;

@@ -23,10 +23,14 @@ import {
   createTransactionSchema,
   importRowSchema,
   money,
+  recurringTemplateSchema,
   vendorUpdateSchema,
 } from "../lib/validation";
 import { bandFor, normaliseDraft } from "../lib/ai-parse";
 import {
+  DEFAULT_SALARY_BASIS,
+  SALARY_BASES,
+  SALARY_BASIS_VALUES,
   computePayout,
   paiseToAmountString,
   parseRupeesToPaise,
@@ -348,6 +352,45 @@ ok("letters are rejected", parseRupeesToPaise("33k") === null);
 ok("a negative salary is rejected", parseRupeesToPaise("-100") === null);
 ok("an empty string is rejected", parseRupeesToPaise("") === null);
 ok("an absurd figure is rejected rather than silently truncated", parseRupeesToPaise("999999999999") === null);
+
+// --- a person's working week is stored, not re-chosen -----------------------
+ok(
+  "the recurring template accepts a working week",
+  recurringTemplateSchema.safeParse({ amountInr: "30000", salaryBasis: "mon-fri" }).success,
+);
+ok(
+  "a template with no working week still parses — rules predate the field",
+  recurringTemplateSchema.safeParse({ amountInr: "30000" }).success,
+);
+ok(
+  "an unknown working week is rejected rather than stored",
+  !recurringTemplateSchema.safeParse({ amountInr: "30000", salaryBasis: "mon-thu" }).success,
+);
+ok(
+  "the stored week survives a round trip",
+  recurringTemplateSchema.safeParse({ amountInr: "30000", salaryBasis: "mon-sat" })
+    .data?.salaryBasis === "mon-sat",
+);
+ok(
+  "every basis the UI offers is a value the schema accepts",
+  SALARY_BASES.every(
+    (b) => recurringTemplateSchema.safeParse({ amountInr: "1", salaryBasis: b.value }).success,
+  ),
+);
+ok(
+  "every basis the schema accepts has a label and a day count",
+  SALARY_BASIS_VALUES.every(
+    (v) =>
+      SALARY_BASES.some((b) => b.value === v) && periodDaysFor("2026-09", v) > 0,
+  ),
+);
+ok(
+  "the default working week is one the schema accepts",
+  recurringTemplateSchema.safeParse({
+    amountInr: "1",
+    salaryBasis: DEFAULT_SALARY_BASIS,
+  }).success,
+);
 
 ok("paise render as a 2dp string", paiseToAmountString(2_568_333) === "25683.33");
 ok("whole rupees keep their decimals", paiseToAmountString(3_350_000) === "33500.00");

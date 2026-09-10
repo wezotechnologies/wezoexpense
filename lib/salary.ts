@@ -18,32 +18,48 @@
  * No Prisma import, so this module is safe on the client.
  */
 
-export type SalaryBasis = "calendar" | "mon-sat" | "mon-fri";
+/** The single list. Zod schemas and the UI both derive from this, so a new
+ *  basis cannot be added in one place and forgotten in the other. */
+export const SALARY_BASIS_VALUES = ["calendar", "mon-sat", "mon-fri"] as const;
+
+export type SalaryBasis = (typeof SALARY_BASIS_VALUES)[number];
+
+/** What a person's working week defaults to when nothing is stored for them. */
+export const DEFAULT_SALARY_BASIS: SalaryBasis = "calendar";
 
 export const SALARY_BASES: {
   value: SalaryBasis;
   label: string;
+  /** Short form, for a badge next to someone's name. */
+  short: string;
   hint: string;
 }[] = [
   {
     value: "calendar",
     label: "Calendar days",
+    short: "Calendar",
     hint: "Every day of the month counts, so a full month always pays exactly the full salary.",
   },
   {
     value: "mon-sat",
     label: "Working days, Mon–Sat",
+    short: "Mon–Sat",
     hint: "Sundays excluded, so a day of leave costs more than on a calendar basis.",
   },
   {
     value: "mon-fri",
     label: "Working days, Mon–Fri",
+    short: "Mon–Fri",
     hint: "Saturdays and Sundays excluded.",
   },
 ];
 
 export function isSalaryBasis(value: unknown): value is SalaryBasis {
-  return value === "calendar" || value === "mon-sat" || value === "mon-fri";
+  return (SALARY_BASIS_VALUES as readonly unknown[]).includes(value);
+}
+
+export function shortBasisLabel(basis: SalaryBasis): string {
+  return SALARY_BASES.find((b) => b.value === basis)?.short ?? basis;
 }
 
 /** ₹10 crore a month. Well beyond real use, and keeps every product exact. */

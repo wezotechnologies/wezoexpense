@@ -54,6 +54,9 @@ export default async function SalaryPage() {
         categoryId,
         categoryName: categoryId ? (categoryNames.get(categoryId) ?? null) : null,
         vendorId: parsed.data.vendorId ?? null,
+        // null when this person has never had a working week recorded; the
+        // calculator falls back to the default rather than guessing.
+        basis: parsed.data.salaryBasis ?? null,
       },
     ];
   });

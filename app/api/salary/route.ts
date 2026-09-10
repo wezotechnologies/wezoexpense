@@ -1,4 +1,4 @@
-import { jsonCreated, jsonError, parseJson, route } from "@/lib/api";
+import { jsonCreated, jsonError, jsonOk, parseJson, route } from "@/lib/api";
 import { requireCapability } from "@/lib/rbac";
 import {
   computePayout,
@@ -8,7 +8,12 @@ import {
   parseRupeesToPaise,
 } from "@/lib/salary";
 import { createTransaction } from "@/lib/transactions";
-import { recordSalarySchema } from "@/lib/validation";
+import { prisma } from "@/lib/prisma";
+import {
+  recordSalarySchema,
+  recurringTemplateSchema,
+  setSalaryBasisSchema,
+} from "@/lib/validation";
 import { formatMonthKey } from "@/lib/format";
 
 /**
@@ -92,4 +97,35 @@ export const POST = route(async (request: Request) => {
     periodDays: payout.periodDays,
     paidDays: payout.paidDays,
   });
+});
+
+/**
+ * PATCH /api/salary — remember a person's working week on their recurring rule.
+ *
+ * Merges into the existing template rather than replacing it. PATCH
+ * /api/recurring takes a whole template and would overwrite every other field
+ * with whatever the browser happened to be holding — which, on a page that
+ * never loaded the notes or payment method, means silently erasing them.
+ */
+export const PATCH = route(async (request: Request) => {
+  await requireCapability("manageRecurring");
+  const input = await parseJson(request, setSalaryBasisSchema);
+
+  const rule = await prisma.recurringRule.findUnique({
+    where: { id: input.ruleId },
+    select: { id: true, name: true, templateJson: true },
+  });
+  if (!rule) return jsonError(404, "That employee's rule no longer exists.");
+
+  const parsed = recurringTemplateSchema.safeParse(rule.templateJson);
+  if (!parsed.success) {
+    return jsonError(422, "That rule's template is not readable.");
+  }
+
+  await prisma.recurringRule.update({
+    where: { id: rule.id },
+    data: { templateJson: { ...parsed.data, salaryBasis: input.basis } },
+  });
+
+  return jsonOk({ ruleId: rule.id, name: rule.name, basis: input.basis });
 });

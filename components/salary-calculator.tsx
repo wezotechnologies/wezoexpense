@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/primitives";
 import { formatInr, formatMonthKey } from "@/lib/format";
 import {
+  DEFAULT_SALARY_BASIS,
   SALARY_BASES,
   type SalaryBasis,
   computePayout,
@@ -21,6 +22,7 @@ import {
   paiseToRupees,
   parseRupeesToPaise,
   periodDaysFor,
+  shortBasisLabel,
 } from "@/lib/salary";
 
 export type SalaryPreset = {
@@ -30,6 +32,8 @@ export type SalaryPreset = {
   categoryId: string | null;
   categoryName: string | null;
   vendorId: string | null;
+  /** null when this person's working week has never been recorded. */
+  basis: SalaryBasis | null;
 };
 
 type Named = { id: string; name: string };
@@ -68,7 +72,11 @@ export function SalaryCalculator({
   const [name, setName] = useState("");
   const [salary, setSalary] = useState("");
   const [month, setMonth] = useState(defaultMonth);
-  const [basis, setBasis] = useState<SalaryBasis>("calendar");
+  const [basis, setBasis] = useState<SalaryBasis>(DEFAULT_SALARY_BASIS);
+  // Mirrors what the server has stored, so the offer to remember a change
+  // appears only when there is actually something to change.
+  const [savedBasis, setSavedBasis] = useState<SalaryBasis | null>(null);
+  const [savingBasis, setSavingBasis] = useState(false);
   const [daysPaid, setDaysPaid] = useState<string>("");
   const [categoryId, setCategoryId] = useState("");
   const [vendorId, setVendorId] = useState("");
@@ -108,12 +116,46 @@ export function SalaryCalculator({
   function applyPreset(id: string) {
     setPresetId(id);
     setDone(null);
+    setError(null);
     const preset = presets.find((p) => p.id === id);
-    if (!preset) return;
+    if (!preset) {
+      setSavedBasis(null);
+      return;
+    }
     setName(preset.name);
     setSalary(preset.monthlyInr);
     setCategoryId(preset.categoryId ?? "");
     setVendorId(preset.vendorId ?? "");
+    // Their contracted working week, so a Mon–Fri employee is never
+    // accidentally paid on a Mon–Sat calculation.
+    setBasis(preset.basis ?? DEFAULT_SALARY_BASIS);
+    setSavedBasis(preset.basis);
+  }
+
+  /** Store the chosen working week against this person, for every future month. */
+  async function rememberBasis() {
+    if (!presetId) return;
+    setSavingBasis(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/salary", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ruleId: presetId, basis }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(body?.error ?? "Could not save the working week.");
+        return;
+      }
+      setSavedBasis(basis);
+      setDone(`${name.trim() || "This employee"} is now on ${shortBasisLabel(basis)}.`);
+      router.refresh();
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setSavingBasis(false);
+    }
   }
 
   async function record() {
@@ -189,12 +231,13 @@ export function SalaryCalculator({
                 {presets.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} — {formatInr(p.monthlyInr)}
-                    {p.categoryName ? ` · ${p.categoryName}` : ""}
+                    {p.basis ? ` · ${shortBasisLabel(p.basis)}` : ""}
                   </option>
                 ))}
               </Select>
               <span className="block text-[11px] text-ink-muted/70">
-                Taken from your active recurring expenses.
+                Taken from your active recurring expenses, along with each
+                person&rsquo;s working week once you have set it.
               </span>
             </label>
           ) : null}
@@ -274,7 +317,7 @@ export function SalaryCalculator({
 
           <label className="block space-y-1">
             <span className="block text-[11px] font-medium text-ink-muted">
-              Counted as
+              Working week
             </span>
             <Select
               value={basis}
@@ -290,6 +333,36 @@ export function SalaryCalculator({
               {basisHint}
             </span>
           </label>
+
+          {/* Staff differ — some Mon–Sat, some Mon–Fri — so the week is stored
+              against the person rather than re-chosen every month. Offered only
+              when it would actually change what is stored. */}
+          {presetId && basis !== savedBasis ? (
+            <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+              <p className="text-[11px] text-ink-muted">
+                {savedBasis === null
+                  ? `${name.trim() || "This employee"} has no working week saved yet.`
+                  : `${name.trim() || "This employee"} is saved as ${shortBasisLabel(savedBasis)}.`}
+              </p>
+              <Button
+                variant="secondary"
+                onClick={rememberBasis}
+                disabled={savingBasis}
+                className="mt-2 w-full"
+              >
+                {savingBasis
+                  ? "Saving…"
+                  : `Always use ${shortBasisLabel(basis)} for ${name.trim() || "this employee"}`}
+              </Button>
+            </div>
+          ) : null}
+
+          {presetId && savedBasis !== null && basis === savedBasis ? (
+            <p className="text-[11px] text-ink-muted/70">
+              Saved working week for {name.trim() || "this employee"} —
+              applied automatically each month.
+            </p>
+          ) : null}
         </div>
       </Card>
 
