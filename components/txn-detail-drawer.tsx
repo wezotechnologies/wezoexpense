@@ -169,7 +169,11 @@ function DrawerContent({
         aria-modal="true"
         className="relative flex h-full w-full max-w-lg flex-col border-l border-line bg-canvas shadow-2xl"
       >
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        {/* Full-height overlay, so it draws under the status bar in an
+            installed PWA just as the app header does — and Close is the only
+            way out of a modal dialog. Inset added to the padding, not replacing
+            it, so nothing shifts on a device without a notch. */}
+        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
           <h2 className="text-sm font-semibold">Transaction</h2>
           <button
             type="button"

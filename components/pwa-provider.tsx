@@ -64,6 +64,10 @@ export function PwaProvider() {
       if (event.data?.type === "DRAIN_OUTBOX") void drainOutbox();
     };
     navigator.serviceWorker?.addEventListener("message", handleMessage);
+    // Queued worker messages are not delivered to an addEventListener listener
+    // until this is called, so a background-sync nudge that fired before this
+    // effect ran would otherwise be dropped.
+    navigator.serviceWorker?.startMessages();
 
     if (online) void drainOutbox();
 
@@ -78,7 +82,10 @@ export function PwaProvider() {
     <div
       role="status"
       className={cx(
-        "sticky top-0 z-40 flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium",
+        // The top inset is added to the padding rather than replacing it, so
+        // the banner keeps its normal breathing room on devices with no notch,
+        // where the inset resolves to 0.
+        "sticky top-0 z-40 flex items-center justify-center gap-2 px-4 py-1.5 pt-[calc(0.375rem+env(safe-area-inset-top))] text-xs font-medium",
         online ? "bg-info/15 text-info" : "bg-pending/15 text-pending",
       )}
     >

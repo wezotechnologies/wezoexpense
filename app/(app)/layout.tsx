@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { NotificationBell } from "@/components/notification-bell";
 import { PwaProvider } from "@/components/pwa-provider";
 import { MobileNav, SidebarNav } from "@/components/sidebar-nav";
+import { SyncButton } from "@/components/sync-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { GlobalSearch } from "@/components/global-search";
@@ -63,7 +64,15 @@ export default async function AppLayout({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur sm:px-5">
+          {/* `viewport-fit=cover` lets the page fill a notched screen, which
+              means an installed PWA draws *underneath* the status bar. Without
+              the top inset the header sat on top of the clock and battery, and
+              the user menu — the only route to Sign out — could not be tapped
+              at all. The height grows by the inset so the 3.5rem content row is
+              preserved; on every other device the inset is 0 and nothing moves. */}
+          <header
+            className="sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-2 border-b border-line bg-canvas/90 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-5"
+          >
             <Link href="/dashboard" className="lg:hidden">
               <Logo className="h-6 w-auto text-ink" />
             </Link>
@@ -71,6 +80,7 @@ export default async function AppLayout({
             <div className="ml-auto flex items-center gap-1 lg:ml-0 lg:w-full">
               <GlobalSearch />
               <div className="flex items-center gap-1 lg:ml-auto">
+                <SyncButton />
                 <ThemeToggle initial={user.themePref === "light" ? "light" : "dark"} />
                 <NotificationBell initialUnread={unread} />
                 <UserMenu name={user.name} email={user.email} role={user.role} />

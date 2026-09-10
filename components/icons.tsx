@@ -80,6 +80,13 @@ export const IconRepeat = (p: IconProps) => (
   </Icon>
 );
 
+export const IconRefresh = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v5h-5" />
+  </Icon>
+);
+
 export const IconTarget = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />

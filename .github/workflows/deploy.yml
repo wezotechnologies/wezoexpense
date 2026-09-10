@@ -55,6 +55,13 @@ jobs:
       - name: Verify business logic
         run: npm run verify:logic
 
+      # The caching contract has no server and no database either: the worker is
+      # loaded into a stubbed scope and driven with real Requests. It guards a
+      # bug that showed one device stale data indefinitely while another showed
+      # the truth, which no amount of manual testing on one device would catch.
+      - name: Verify service worker caching
+        run: npm run verify:sw
+
       # No env is set here on purpose. The build needs no database URL and no
       # auth secret: the Prisma client is constructed lazily and the Auth.js
       # config is a function, so both are read on the first request rather than

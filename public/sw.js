@@ -1,12 +1,24 @@
 /* Wezo Expenses service worker (spec 13).
  *
  * Strategy
- *  - App shell + static assets: cache-first (Next hashes /_next/static, so it
- *    is safe to treat as immutable).
+ *  - App shell + hashed build output + static files: cache-first (Next hashes
+ *    /_next/static, so it is safe to treat as immutable).
  *  - Navigations: network-first, falling back to the cached shell and then to
  *    /offline so the app always opens.
- *  - API GETs: network-first with a runtime cache fallback, so a phone that
- *    drops signal still shows the last known figures.
+ *  - API GETs and in-app navigation payloads: network-first with a runtime
+ *    cache fallback, so a phone that drops signal still shows the last known
+ *    figures, but a phone with signal always shows the current ones.
+ *
+ * ONLY content whose URL changes when the content changes may be cache-first.
+ * That rules out far more than it first appears: an in-app navigation does not
+ * issue a `navigate` request at all. Next fetches a React Server Component
+ * payload for the destination — a normal same-origin GET carrying an `rsc`
+ * header and an `_rsc=` query param, with request.mode "cors". A catch-all
+ * cache-first branch therefore swallowed every page's data and replayed it
+ * forever: a device that opened a page before some records existed kept showing
+ * the empty version indefinitely, while other devices showed the truth. The
+ * `_rsc` parameter exists to *defeat* intermediate caches; treating it as a
+ * cache key inverted its purpose.
  *
  * Deliberately NOT cached (spec 14): anything under /api/auth (session
  * material) and /api/receipt (short-lived SAS URLs and receipt images). The
@@ -18,10 +30,12 @@
  * it in the worker.
  */
 
-const VERSION = "wezo-v1";
+// Bumped to v2 to evict caches poisoned by the cache-first bug described above.
+const VERSION = "wezo-v2";
 const SHELL_CACHE = `${VERSION}-shell`;
 const STATIC_CACHE = `${VERSION}-static`;
 const API_CACHE = `${VERSION}-api`;
+const PAGE_CACHE = `${VERSION}-pages`;
 
 const SHELL_URLS = [
   "/offline",
@@ -50,10 +64,19 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k)),
-      );
+      const stale = keys.filter((k) => !k.startsWith(VERSION));
+      await Promise.all(stale.map((k) => caches.delete(k)));
       await self.clients.claim();
+
+      // An upgrade evicts caches, but the tab on screen is still showing
+      // whatever the old worker last served it. Claiming does not re-render, so
+      // ask open pages to pull fresh data — otherwise the fix only becomes
+      // visible the next time the user happens to reload, which on an installed
+      // PWA may be days away.
+      if (stale.length > 0) {
+        const clients = await self.clients.matchAll({ type: "window" });
+        for (const client of clients) client.postMessage({ type: "REFRESH" });
+      }
     })(),
   );
 });
@@ -87,6 +110,26 @@ function isNeverCached(pathname) {
   return NEVER_CACHE.some((p) => pathname.startsWith(p));
 }
 
+/**
+ * A React Server Component payload — what an in-app navigation actually
+ * fetches. It looks like an ordinary GET for the page's own path, so the only
+ * way to tell it apart is the header Next sets or its cache-busting query
+ * param. Checking both: the header is authoritative, the param survives cases
+ * where headers are not exposed.
+ */
+function isRscRequest(request, url) {
+  return request.headers.has("rsc") || url.searchParams.has("_rsc");
+}
+
+/**
+ * Files whose contents cannot change without the URL changing too — hashed
+ * bundles, fonts, images. Anything not matching is dynamic by default, which is
+ * the safe way round: a missed asset is a wasted request, a wrongly cached page
+ * is wrong data on screen.
+ */
+const STATIC_ASSET =
+  /\.(?:css|js|mjs|woff2?|ttf|otf|png|jpe?g|gif|svg|webp|avif|ico)$/i;
+
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
@@ -94,7 +137,7 @@ async function networkFirst(request, cacheName) {
     if (response && response.ok) cache.put(request, response.clone());
     return response;
   } catch (error) {
-    const cached = await cache.match(request);
+    const cached = (await cache.match(request)) ?? (await caches.match(request));
     if (cached) return cached;
     throw error;
   }
@@ -102,7 +145,9 @@ async function networkFirst(request, cacheName) {
 
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
+  // Fall back to any cache, so shell entries precached under a different name
+  // still answer on a cold, offline start.
+  const cached = (await cache.match(request)) ?? (await caches.match(request));
   if (cached) return cached;
   const response = await fetch(request);
   if (response && response.ok) cache.put(request, response.clone());
@@ -147,6 +192,18 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // In-app navigation payloads. These carry live figures, so they are treated
+  // exactly like API data: fresh whenever the network allows, last-known
+  // otherwise. Checked before the extension test below, because the URL is the
+  // page's own path and may well end in something that looks like a file.
+  if (isRscRequest(request, url)) {
+    // No synthetic fallback: if there is nothing cached, let the request fail
+    // so Next falls back to a full page load rather than rendering a payload
+    // the router cannot parse.
+    event.respondWith(networkFirst(request, PAGE_CACHE));
+    return;
+  }
+
   // API data — network-first (spec 13).
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
@@ -161,8 +218,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Everything else same-origin: cache-first with a network fill.
-  event.respondWith(
-    cacheFirst(request, STATIC_CACHE).catch(() => fetch(request)),
-  );
+  // Genuinely static files.
+  if (STATIC_ASSET.test(url.pathname)) {
+    event.respondWith(
+      cacheFirst(request, STATIC_CACHE).catch(() => fetch(request)),
+    );
+    return;
+  }
+
+  // Everything else same-origin is dynamic — the manifest, any HTML fetched
+  // without a navigation. Network-first, never cache-first.
+  event.respondWith(networkFirst(request, PAGE_CACHE));
 });
