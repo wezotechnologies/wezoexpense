@@ -239,19 +239,23 @@ curl -s -b emp2.jar -o /dev/null -X PATCH "$B/api/me/password" -H "Content-Type:
   -d "{\"currentPassword\":\"$RESET_PW\",\"newPassword\":\"RaviBooks2026a\"}"
 
 print -r -- "\n=============== 8. Audit log captured everything ==============="
-curl -s -b super.jar "$B/api/audit?perPage=200" | node -e "
-const d=JSON.parse(require('fs').readFileSync(0));
-const counts={};
-for(const e of d.entries) counts[e.action]=(counts[e.action]||0)+1;
-const want=['CREATE_TXN','APPROVE_TXN','REJECT_TXN','ADD_USER','CHANGE_ROLE','DEACTIVATE_USER','RESET_PASSWORD','CHANGE_OWN_PASSWORD','LOCK_PERIOD','UNLOCK_PERIOD','IMPORT_TXN','RUN_RECURRING','CREATE_RECURRING'];
-let miss=0;
-for(const a of want){
-  if(counts[a]) console.log('  ok   logged '+a+' x'+counts[a]);
-  else { console.log('  FAIL never logged '+a); miss++; }
-}
-console.log('       total audit entries: '+d.total);
-process.exit(0);
-"
+# Counted with one filtered query per action rather than by tallying the most
+# recent 200 entries. That earlier approach reported "never logged ADD_USER" on
+# any database with more than 200 entries — the entry was there, just outside
+# the window — and a suite that cries wolf is a suite people learn to ignore.
+for action in CREATE_TXN APPROVE_TXN REJECT_TXN ADD_USER CHANGE_ROLE \
+              DEACTIVATE_USER RESET_PASSWORD CHANGE_OWN_PASSWORD \
+              LOCK_PERIOD UNLOCK_PERIOD IMPORT_TXN RUN_RECURRING \
+              CREATE_RECURRING; do
+  n=$(curl -s -b super.jar "$B/api/audit?action=${action}&perPage=1" \
+        | node -pe "JSON.parse(require('fs').readFileSync(0)).total")
+  if [[ "$n" == <-> && "$n" -gt 0 ]]; then
+    ok "logged ${action} x${n}"
+  else
+    bad "never logged ${action}"
+  fi
+done
+print -r -- "       total audit entries: $(curl -s -b super.jar "$B/api/audit?perPage=1" | node -pe "JSON.parse(require('fs').readFileSync(0)).total")"
 
 print -r -- "\n=============== 9. Reports reflect the imported data ==============="
 curl -s -b super.jar "$B/api/reports/pnl?month=2026-08" | node -e "

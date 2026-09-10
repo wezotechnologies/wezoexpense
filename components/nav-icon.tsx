@@ -14,6 +14,7 @@ import {
   IconTarget,
   IconUpload,
   IconUsers,
+  IconWallet,
 } from "@/components/icons";
 
 /** Maps a NavItem's icon name to its component. */
@@ -33,6 +34,7 @@ const MAP = {
   users: IconUsers,
   settings: IconSettings,
   bell: IconBell,
+  wallet: IconWallet,
 } as const;
 
 export function NavIcon({

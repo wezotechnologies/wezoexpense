@@ -36,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   { href: "/budgets", label: "Budgets", icon: "target", roles: ADMIN_PLUS, group: "manage" },
   { href: "/recurring", label: "Recurring", icon: "repeat", roles: ADMIN_PLUS, group: "manage" },
+  { href: "/salary", label: "Salary calculator", short: "Salary", icon: "wallet", roles: ADMIN_PLUS, group: "manage" },
   { href: "/directories", label: "Categories & vendors", short: "Directories", icon: "tag", roles: ADMIN_PLUS, group: "manage" },
   { href: "/import", label: "Import CSV", icon: "upload", roles: ADMIN_PLUS, group: "manage" },
   { href: "/close", label: "Monthly close", icon: "lock", roles: ADMIN_PLUS, group: "manage" },

@@ -89,6 +89,7 @@ export type Capability =
   | "manageDirectories"
   | "runReports"
   | "manageRecurring"
+  | "calculateSalary"
   | "manageBudgets"
   | "lockPeriod"
   | "unlockPeriod"
@@ -113,6 +114,8 @@ const CAPABILITIES: Record<Capability, Role[]> = {
   manageDirectories: ADMIN_PLUS,
   runReports: ADMIN_PLUS,
   manageRecurring: ADMIN_PLUS,
+  // Reads every salary figure in the books, so it is not an employee tool.
+  calculateSalary: ADMIN_PLUS,
   manageBudgets: ADMIN_PLUS,
   lockPeriod: ADMIN_PLUS,
   importCsv: ADMIN_PLUS,

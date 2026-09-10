@@ -525,3 +525,29 @@ export const importCommitSchema = z.object({
   rows: z.array(importRowSchema).min(1).max(2000),
   approve: z.boolean().default(false),
 });
+
+/**
+ * Recording a pro-rata salary payment (POST /api/salary).
+ *
+ * The amount is deliberately absent. The server recomputes it from these
+ * inputs with lib/salary.ts, so the stored figure is derived from the same
+ * arithmetic the calculator showed rather than trusted from the request — and
+ * the inputs land in the transaction's notes, which makes the number
+ * reproducible months later when someone asks how it was arrived at.
+ */
+export const recordSalarySchema = z.object({
+  monthlyInr: money(),
+  month: monthKeySchema,
+  basis: z.enum(["calendar", "mon-sat", "mon-fri"]),
+  /** Half-day units, so 23.5 days is exact rather than a float. */
+  paidHalfDays: z.coerce.number().int().min(0).max(124),
+  employeeName: trimmed(120).pipe(
+    z.string().min(1, { error: "Say who this payment is for." }),
+  ),
+  date: dateOnlySchema,
+  categoryId: optionalId,
+  vendorId: optionalId,
+  notes: optionalText(2000),
+  saveAsApproved: z.boolean().default(false),
+});
+export type RecordSalaryInput = z.infer<typeof recordSalarySchema>;

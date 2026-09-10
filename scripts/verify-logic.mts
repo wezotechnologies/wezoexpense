@@ -26,6 +26,12 @@ import {
   vendorUpdateSchema,
 } from "../lib/validation";
 import { bandFor, normaliseDraft } from "../lib/ai-parse";
+import {
+  computePayout,
+  paiseToAmountString,
+  parseRupeesToPaise,
+  periodDaysFor,
+} from "../lib/salary";
 
 let passed = 0;
 let failed = 0;
@@ -218,6 +224,134 @@ ok("a missing confidence defaults low enough to prompt review",
   normaliseDraft({})?.confidence === 0.4);
 ok("a ₹-prefixed amount parses",
   normaliseDraft({ amountInr: "₹ 20,000.00" })?.amountInr === 20000);
+
+// ---------------------------------------------------------------------------
+section("Salary: pro-rata to the paisa");
+// ---------------------------------------------------------------------------
+
+// --- how long is the month -------------------------------------------------
+ok("September 2026 has 30 calendar days", periodDaysFor("2026-09", "calendar") === 30);
+ok("February 2026 has 28", periodDaysFor("2026-02", "calendar") === 28);
+ok("February 2028 has 29 (leap)", periodDaysFor("2028-02", "calendar") === 29);
+ok("December 2026 has 31", periodDaysFor("2026-12", "calendar") === 31);
+ok("a malformed month key yields 0, not NaN", periodDaysFor("2026-13", "calendar") === 0);
+ok("an empty month key yields 0", periodDaysFor("", "calendar") === 0);
+
+// Sept 2026 starts on a Tuesday: 4 Sundays (6,13,20,27), 4 Saturdays (5,12,19,26).
+ok("Sept 2026 Mon–Sat is 26 days", periodDaysFor("2026-09", "mon-sat") === 26, periodDaysFor("2026-09", "mon-sat"));
+ok("Sept 2026 Mon–Fri is 22 days", periodDaysFor("2026-09", "mon-fri") === 22, periodDaysFor("2026-09", "mon-fri"));
+ok(
+  "the three bases agree on the total",
+  periodDaysFor("2026-09", "calendar") ===
+    periodDaysFor("2026-09", "mon-fri") + 4 + 4,
+);
+
+// --- the money -------------------------------------------------------------
+const full = computePayout({
+  monthlyPaise: 3_350_000, // ₹33,500
+  monthKey: "2026-09",
+  basis: "calendar",
+  paidHalfDays: 60, // all 30 days
+});
+ok("a full month pays the salary exactly", full.payablePaise === 3_350_000, paiseToAmountString(full.payablePaise));
+ok("a full month has no loss of pay", full.lopPaise === 0);
+
+// ₹33,500 over 30 days, 23 paid: 33500 * 23 / 30 = 25683.3333... -> 25683.33
+const partial = computePayout({
+  monthlyPaise: 3_350_000,
+  monthKey: "2026-09",
+  basis: "calendar",
+  paidHalfDays: 46, // 23 days
+});
+ok(
+  "23 of 30 days on ₹33,500 is ₹25,683.33",
+  paiseToAmountString(partial.payablePaise) === "25683.33",
+  paiseToAmountString(partial.payablePaise),
+);
+ok(
+  "payable + loss of pay equals the salary, always",
+  partial.payablePaise + partial.lopPaise === 3_350_000,
+);
+ok(
+  "the per-day figure is not used to build the total",
+  // 25683.33 != perDay(1116.67) * 23 = 25683.41 — proving the total is derived
+  // from the salary, not from a rounded daily rate.
+  partial.payablePaise !== partial.perDayPaise * 23,
+  { payable: partial.payablePaise, viaPerDay: partial.perDayPaise * 23 },
+);
+
+// Half days
+const half = computePayout({
+  monthlyPaise: 3_000_000, // ₹30,000
+  monthKey: "2026-09",
+  basis: "calendar",
+  paidHalfDays: 59, // 29.5 days
+});
+ok("half a day is honoured", half.paidDays === 29.5, half.paidDays);
+ok(
+  "₹30,000 less half a day is ₹29,500",
+  paiseToAmountString(half.payablePaise) === "29500.00",
+  paiseToAmountString(half.payablePaise),
+);
+
+// Rounding: ₹10,000 over 30 days, 1 day = 333.3333 -> 333.33
+ok(
+  "a repeating third rounds down correctly",
+  paiseToAmountString(
+    computePayout({ monthlyPaise: 1_000_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: 2 }).payablePaise,
+  ) === "333.33",
+);
+// ₹10,000 over 30 days, 2 days = 666.6667 -> 666.67 (half-up, not truncation)
+ok(
+  "a repeating two-thirds rounds up, not truncates",
+  paiseToAmountString(
+    computePayout({ monthlyPaise: 1_000_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: 4 }).payablePaise,
+  ) === "666.67",
+);
+
+// Clamping and degenerate input
+ok(
+  "zero days paid pays nothing",
+  computePayout({ monthlyPaise: 3_350_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: 0 }).payablePaise === 0,
+);
+ok(
+  "more days than the month holds is clamped, not extrapolated",
+  computePayout({ monthlyPaise: 3_350_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: 200 }).payablePaise ===
+    3_350_000,
+);
+ok(
+  "negative days are clamped to zero",
+  computePayout({ monthlyPaise: 3_350_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: -5 }).payablePaise === 0,
+);
+ok(
+  "a bad month key pays nothing rather than NaN",
+  computePayout({ monthlyPaise: 3_350_000, monthKey: "nope", basis: "calendar", paidHalfDays: 40 }).payablePaise === 0,
+);
+
+// Working-day basis costs more per day of leave — the reason the basis matters.
+const onCalendar = computePayout({ monthlyPaise: 3_000_000, monthKey: "2026-09", basis: "calendar", paidHalfDays: 58 });
+const onWorking = computePayout({ monthlyPaise: 3_000_000, monthKey: "2026-09", basis: "mon-sat", paidHalfDays: 50 });
+ok(
+  "one day of leave costs more on a working-day basis",
+  onWorking.lopPaise > onCalendar.lopPaise,
+  { calendar: onCalendar.lopPaise, working: onWorking.lopPaise },
+);
+
+// --- parsing typed rupees --------------------------------------------------
+ok("plain rupees parse", parseRupeesToPaise("33500") === 3_350_000);
+ok("grouping commas are tolerated", parseRupeesToPaise("33,500") === 3_350_000);
+ok("a ₹ prefix is tolerated", parseRupeesToPaise("₹ 33,500.50") === 3_350_050);
+ok("two decimals are exact", parseRupeesToPaise("0.07") === 7);
+ok("a third decimal rounds half-up", parseRupeesToPaise("1.005") === 101, parseRupeesToPaise("1.005"));
+ok("a trailing dot parses", parseRupeesToPaise("100.") === 10_000);
+ok("letters are rejected", parseRupeesToPaise("33k") === null);
+ok("a negative salary is rejected", parseRupeesToPaise("-100") === null);
+ok("an empty string is rejected", parseRupeesToPaise("") === null);
+ok("an absurd figure is rejected rather than silently truncated", parseRupeesToPaise("999999999999") === null);
+
+ok("paise render as a 2dp string", paiseToAmountString(2_568_333) === "25683.33");
+ok("whole rupees keep their decimals", paiseToAmountString(3_350_000) === "33500.00");
+ok("single paise pad correctly", paiseToAmountString(5) === "0.05");
 
 // ---------------------------------------------------------------------------
 console.log("\n==================================================");
