@@ -408,9 +408,20 @@ export const recurringCreateSchema = z.object({
   template: recurringTemplateSchema,
 });
 
+/**
+ * A template patch: only the keys actually sent are validated, and absent keys
+ * stay `undefined` so the route can tell "not supplied" from "clear this".
+ *
+ * The full template schema turns an absent optional into null, which is right
+ * on create — an empty form field means no vendor — but destructive on an
+ * edit: a form that does not know about `salaryBasis` or `paymentLabel` would
+ * erase them simply by saving an unrelated change.
+ */
+export const recurringTemplatePatchSchema = recurringTemplateSchema.partial();
+
 export const recurringUpdateSchema = recurringCreateSchema
   .partial()
-  .extend({ id: idSchema });
+  .extend({ id: idSchema, template: recurringTemplatePatchSchema.optional() });
 
 export const budgetSchema = z.object({
   categoryId: idSchema,

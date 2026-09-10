@@ -4,8 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { AuditAction, recordAudit } from "@/lib/audit";
 import { istDateToUtc } from "@/lib/dates";
 import { serializeRule } from "@/lib/recurring";
-import { recurringCreateSchema, recurringUpdateSchema } from "@/lib/validation";
+import {
+  recurringCreateSchema,
+  recurringTemplateSchema,
+  recurringUpdateSchema,
+} from "@/lib/validation";
 import { TxnType } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 
 /** Recurring rules — Admin+ (spec 3, 7.4, 12). */
 
@@ -92,8 +97,26 @@ export const PATCH = route(async (request: Request) => {
   if (!existing) throw new ApiError(404, "That rule no longer exists.");
 
   const nextType = input.type ?? existing.type;
-  if (input.template) {
-    await assertTemplateValid(input.template.categoryId, nextType);
+
+  // Merge the supplied keys into the stored template rather than replacing it.
+  // Replacing meant any caller that did not round-trip every field silently
+  // erased the rest — the salary calculator's stored working week, a payment
+  // label, an original-currency pair. `undefined` is "not supplied"; an
+  // explicit null still clears the field.
+  let nextTemplate: Prisma.InputJsonObject | undefined;
+  if (input.template !== undefined) {
+    const stored = recurringTemplateSchema.safeParse(existing.templateJson);
+    const merged: Record<string, unknown> = {
+      ...(stored.success ? stored.data : {}),
+    };
+    for (const [key, value] of Object.entries(input.template)) {
+      if (value !== undefined) merged[key] = value;
+    }
+    nextTemplate = merged as Prisma.InputJsonObject;
+    await assertTemplateValid(
+      (nextTemplate.categoryId as string | null | undefined) ?? null,
+      nextType,
+    );
   }
 
   const rule = await prisma.$transaction(async (tx) => {
@@ -108,7 +131,7 @@ export const PATCH = route(async (request: Request) => {
           : {}),
         ...(input.autoApprove !== undefined ? { autoApprove: input.autoApprove } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-        ...(input.template !== undefined ? { templateJson: input.template } : {}),
+        ...(nextTemplate !== undefined ? { templateJson: nextTemplate } : {}),
       },
       include: withCount,
     });
@@ -123,12 +146,17 @@ export const PATCH = route(async (request: Request) => {
           isActive: existing.isActive,
           nextRunDate: existing.nextRunDate,
           autoApprove: existing.autoApprove,
+          // Correcting an amount is the main reason to edit a rule, so it has
+          // to be in the trail — otherwise the log says something changed
+          // without saying what.
+          template: existing.templateJson,
         },
         after: {
           name: updated.name,
           isActive: updated.isActive,
           nextRunDate: updated.nextRunDate,
           autoApprove: updated.autoApprove,
+          template: updated.templateJson,
         },
       },
       tx,

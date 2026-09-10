@@ -195,8 +195,12 @@ Then prove the connection string actually works — this is the same thing the
 deploy does, so a failure here saves you a round trip through CI:
 
 ```bash
-sudo -u wezo bash -c 'set -a; . /opt/wezo/shared/.env; set +a; psql "$DATABASE_URL" -c "select current_database()"'
+sudo -u wezo bash -c 'set -a; . /opt/wezo/shared/.env; set +a; psql "${DATABASE_URL}&sslrootcert=system" -c "select current_database()"'
 ```
+`sslrootcert=system` tells `psql` to use the machine's trusted roots. Without
+it, libpq looks for a CA at `~/.postgresql/root.crt` and fails on the missing
+file, because `DATABASE_URL` asks for `sslmode=verify-full`. The app is
+unaffected — node-postgres verifies against its own bundled CA set.
 
 You want `wezo_expenses`. If it hangs, this VM's IP is not in the Postgres
 firewall yet — go back to Part 4.

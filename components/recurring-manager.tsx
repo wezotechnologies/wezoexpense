@@ -43,6 +43,9 @@ export function RecurringManager({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runReport, setRunReport] = useState<string | null>(null);
+  // null = creating. A rule id = editing that rule with the same form, so
+  // there is one set of fields and one set of validation rather than two.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -58,39 +61,99 @@ export function RecurringManager({
 
   const availableCategories = categories.filter((c) => c.type === form.type);
 
-  async function create(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy("new");
+  const blank = {
+    name: "",
+    type: "EXPENSE" as "INCOME" | "EXPENSE",
+    frequency: "MONTHLY" as "WEEKLY" | "MONTHLY" | "YEARLY",
+    nextRunDate: today,
+    amountInr: "",
+    categoryId: "",
+    vendorId: "",
+    notes: "",
+    autoApprove: false,
+  };
+
+  function startEdit(rule: RecurringRuleDTO) {
+    setEditingId(rule.id);
     setError(null);
+    setRunReport(null);
+    setForm({
+      name: rule.name,
+      type: rule.type,
+      frequency: rule.frequency,
+      nextRunDate: rule.nextRunDate.slice(0, 10),
+      amountInr: rule.amountInr,
+      categoryId: rule.categoryId ?? "",
+      vendorId: rule.vendorId ?? "",
+      notes: rule.notes ?? "",
+      autoApprove: rule.autoApprove,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setError(null);
+    setForm(blank);
+  }
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(editingId ?? "new");
+    setError(null);
+
+    // Only the fields this form owns are sent. The route merges them into the
+    // stored template, so anything it does not know about — a person's salary
+    // working week, a payment label — survives the edit.
+    const template = {
+      amountInr: form.amountInr,
+      categoryId: form.categoryId || null,
+      vendorId: form.vendorId || null,
+      notes: form.notes || null,
+    };
 
     try {
       const response = await fetch("/api/recurring", {
-        method: "POST",
+        method: editingId ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          type: form.type,
-          frequency: form.frequency,
-          nextRunDate: form.nextRunDate,
-          autoApprove: form.autoApprove,
-          isActive: true,
-          template: {
-            amountInr: form.amountInr,
-            categoryId: form.categoryId || null,
-            vendorId: form.vendorId || null,
-            notes: form.notes || null,
-            routing: "DIRECT",
-          },
-        }),
+        body: JSON.stringify(
+          editingId
+            ? {
+                id: editingId,
+                name: form.name,
+                type: form.type,
+                frequency: form.frequency,
+                nextRunDate: form.nextRunDate,
+                autoApprove: form.autoApprove,
+                template,
+              }
+            : {
+                name: form.name,
+                type: form.type,
+                frequency: form.frequency,
+                nextRunDate: form.nextRunDate,
+                autoApprove: form.autoApprove,
+                isActive: true,
+                template: { ...template, routing: "DIRECT" },
+              },
+        ),
       });
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        setError(data.error ?? "Could not create that rule.");
+        setError(
+          data.error ??
+            (editingId ? "Could not save that rule." : "Could not create that rule."),
+        );
         return;
       }
 
-      setForm({ ...form, name: "", amountInr: "", notes: "" });
+      if (editingId) {
+        setRunReport(`Saved ${form.name.trim() || "the rule"}.`);
+        setEditingId(null);
+        setForm(blank);
+      } else {
+        setForm({ ...form, name: "", amountInr: "", notes: "" });
+      }
       router.refresh();
     } catch {
       setError("Could not reach the server.");
@@ -147,8 +210,15 @@ export function RecurringManager({
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,340px)_1fr]">
       <Card>
-        <CardHeader title="New rule" description="Rent, salaries, subscriptions." />
-        <form onSubmit={create} className="space-y-3 p-4">
+        <CardHeader
+          title={editingId ? "Edit rule" : "New rule"}
+          description={
+            editingId
+              ? "Correcting an amount here changes what future runs create; anything already generated is untouched."
+              : "Rent, salaries, subscriptions."
+          }
+        />
+        <form onSubmit={save} className="space-y-3 p-4">
           {error ? <Alert tone="error">{error}</Alert> : null}
 
           <label className="block space-y-1">
@@ -286,15 +356,26 @@ export function RecurringManager({
             </span>
           </label>
 
-          <Button
-            type="submit"
-            variant="primary"
-            className="w-full"
-            disabled={busy === "new" || !form.name || !form.amountInr}
-          >
-            {busy === "new" ? <Spinner /> : <IconPlus className="h-4 w-4" />}
-            Create rule
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              variant="primary"
+              className="flex-1"
+              disabled={busy !== null || !form.name || !form.amountInr}
+            >
+              {busy !== null ? (
+                <Spinner />
+              ) : editingId ? null : (
+                <IconPlus className="h-4 w-4" />
+              )}
+              {editingId ? "Save changes" : "Create rule"}
+            </Button>
+            {editingId ? (
+              <Button variant="secondary" onClick={cancelEdit} disabled={busy !== null}>
+                Cancel
+              </Button>
+            ) : null}
+          </div>
         </form>
       </Card>
 
@@ -367,14 +448,24 @@ export function RecurringManager({
                       </p>
                     </div>
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy === rule.id}
-                      onClick={() => toggle(rule)}
-                    >
-                      {rule.isActive ? "Pause" : "Resume"}
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy !== null}
+                        onClick={() => startEdit(rule)}
+                      >
+                        {editingId === rule.id ? "Editing" : "Edit"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === rule.id}
+                        onClick={() => toggle(rule)}
+                      >
+                        {rule.isActive ? "Pause" : "Resume"}
+                      </Button>
+                    </div>
                   </div>
                 </li>
               );

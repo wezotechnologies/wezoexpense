@@ -112,8 +112,12 @@ rules — and while you are there, **remove any home/office IP** left over from
 setup. Then confirm:
 
 ```bash
-sudo -u wezo bash -c 'set -a; . /opt/wezo/shared/.env; set +a; psql "$DATABASE_URL" -c "select current_database()"'
+sudo -u wezo bash -c 'set -a; . /opt/wezo/shared/.env; set +a; psql "${DATABASE_URL}&sslrootcert=system" -c "select current_database()"'
 ```
+`sslrootcert=system` tells `psql` to use the machine's trusted roots. Without
+it, libpq looks for a CA at `~/.postgresql/root.crt` and fails on the missing
+file, because `DATABASE_URL` asks for `sslmode=verify-full`. The app is
+unaffected — node-postgres verifies against its own bundled CA set.
 
 ### 3. GitHub repository secrets
 

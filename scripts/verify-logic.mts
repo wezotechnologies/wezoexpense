@@ -23,6 +23,7 @@ import {
   createTransactionSchema,
   importRowSchema,
   money,
+  recurringTemplatePatchSchema,
   recurringTemplateSchema,
   vendorUpdateSchema,
 } from "../lib/validation";
@@ -390,6 +391,48 @@ ok(
     amountInr: "1",
     salaryBasis: DEFAULT_SALARY_BASIS,
   }).success,
+);
+
+// --- editing a rule must not erase what the form does not know about -------
+// The edit form owns four template fields. A rule may carry more: a working
+// week, a payment label. The full schema turns absent optionals into null,
+// which on an edit means "erase"; the patch schema leaves them undefined,
+// which the route reads as "not supplied".
+const formPayload = {
+  amountInr: "32500",
+  categoryId: null,
+  vendorId: null,
+  notes: "keep me",
+};
+const asFull = recurringTemplateSchema.safeParse(formPayload);
+const asPatch = recurringTemplatePatchSchema.safeParse(formPayload);
+ok("the form payload parses either way", asFull.success && asPatch.success);
+ok(
+  "the FULL schema would clear paymentMethod — why PATCH must not use it",
+  asFull.data?.paymentMethod === null,
+  asFull.data?.paymentMethod,
+);
+ok(
+  "the PATCH schema leaves paymentMethod unsupplied",
+  asPatch.success && asPatch.data.paymentMethod === undefined,
+);
+ok(
+  "the PATCH schema leaves a stored working week unsupplied",
+  asPatch.success && asPatch.data.salaryBasis === undefined,
+);
+ok(
+  "the PATCH schema still validates what IS supplied",
+  !recurringTemplatePatchSchema.safeParse({ amountInr: "0" }).success &&
+    !recurringTemplatePatchSchema.safeParse({ amountInr: "-5" }).success &&
+    !recurringTemplatePatchSchema.safeParse({ salaryBasis: "mon-thu" }).success,
+);
+ok(
+  "an explicit null still means clear",
+  recurringTemplatePatchSchema.safeParse({ notes: null }).data?.notes === null,
+);
+ok(
+  "an empty patch is valid — a rename touches no template field",
+  recurringTemplatePatchSchema.safeParse({}).success,
 );
 
 ok("paise render as a 2dp string", paiseToAmountString(2_568_333) === "25683.33");
