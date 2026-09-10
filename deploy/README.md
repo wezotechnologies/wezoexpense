@@ -71,7 +71,7 @@ git clone https://github.com/wezotechnologies/wezoexpense.git /tmp/wezo-src
 sudo bash /tmp/wezo-src/deploy/provision.sh
 ```
 
-That installs Node 20, nginx, ufw, a dedicated unprivileged `wezo` service
+That installs Node 22, nginx, ufw, a dedicated unprivileged `wezo` service
 account, the `/opt/wezo` release layout, both systemd services, and a
 least-privilege sudoers rule so the deploy user can restart *only* these
 services and reload nginx — not act as root generally.
@@ -187,7 +187,7 @@ skipped night is not a problem.)
 ```bash
 # What is live, and which build?
 cat /opt/wezo/active
-curl -s http://127.0.0.1/api/health | jq
+sudo /opt/wezo/healthcheck.sh
 
 # Logs
 journalctl -u "wezo@$(cat /opt/wezo/active)" -f

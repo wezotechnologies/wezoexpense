@@ -155,6 +155,9 @@ jobs:
           # git provenance agree.
           RELEASE="$(date -u +%Y-%m-%dT%H-%M-%S)-${GITHUB_SHA::7}"
           REMOTE="/opt/wezo/releases/${RELEASE}"
+          # Handed to the confirmation step so it verifies *this* release is the
+          # one being served, rather than whatever happens to be active.
+          echo "RELEASE=${RELEASE}" >> "$GITHUB_ENV"
 
           echo "::group::Uploading ${RELEASE}"
           $SSH "$TARGET" "mkdir -p '${REMOTE}'"
@@ -166,13 +169,22 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Blue/green switch"
-          # Always run the deploy script from the repo, not from the release,
-          # so a fix to the script takes effect on the very next deploy.
-          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
-            deploy/deploy.sh "$TARGET:/tmp/wezo-deploy.sh"
-          $SSH "$TARGET" "chmod +x /tmp/wezo-deploy.sh && /tmp/wezo-deploy.sh '${REMOTE}'"
+          # Always run the deploy scripts from the repo, not from the release,
+          # so a fix to them takes effect on the very next deploy. The whole
+          # directory is shipped, not just deploy.sh, so the scripts can find
+          # each other — healthcheck.sh is shared by the switch and by the
+          # confirmation step below, and duplicating it is how the two drifted
+          # apart in the first place.
+          $SSH "$TARGET" "rm -rf /tmp/wezo-deploy"
+          scp -r -i ~/.ssh/deploy_key -o BatchMode=yes \
+            deploy "$TARGET:/tmp/wezo-deploy"
+          $SSH "$TARGET" "chmod +x /tmp/wezo-deploy/*.sh && /tmp/wezo-deploy/deploy.sh '${REMOTE}'"
           echo "::endgroup::"
 
+      # This step decides whether the release stays. It must therefore test the
+      # URL real visitors use — an earlier version curled http://127.0.0.1,
+      # which stopped being reachable the moment certbot turned port 80 into a
+      # redirect-only block, and rolled back a release that was serving fine.
       - name: Confirm the deployed release is serving
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -180,7 +192,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "curl -fsS http://127.0.0.1/api/health | jq -e '.ready == true'" \
+            "/tmp/wezo-deploy/healthcheck.sh '${RELEASE}'" \
             && echo "Live and healthy."
 
       - name: Roll back on failure
@@ -190,8 +202,13 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           echo "::error::Deploy failed — attempting rollback to the previous colour."
-          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
-            deploy/rollback.sh "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/wezo-rollback.sh" || exit 0
+          # The scripts are already on the host from the switch step; re-upload
+          # only if that step never got that far.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "test -x /tmp/wezo-deploy/rollback.sh" \
+            || scp -r -i ~/.ssh/deploy_key -o BatchMode=yes \
+                 deploy "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/wezo-deploy" \
+            || exit 0
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "chmod +x /tmp/wezo-rollback.sh && /tmp/wezo-rollback.sh" || true
+            "chmod +x /tmp/wezo-deploy/*.sh && /tmp/wezo-deploy/rollback.sh" || true

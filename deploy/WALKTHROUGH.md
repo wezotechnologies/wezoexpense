@@ -78,7 +78,7 @@ and try again. Once it answers, carry on.
 
 ## Part 3 — Set up the VM  🖥️ On the VM
 
-One script does the whole machine: Node 20, nginx, the firewall, a locked-down
+One script does the whole machine: Node 22, nginx, the firewall, a locked-down
 service account, and the two app slots that make zero-downtime deploys work.
 
 ```bash
@@ -93,7 +93,7 @@ if it stops halfway.
 ### Check it worked
 
 ```bash
-node -v                          # v20.x or newer
+node -v                          # v22.x or newer
 systemctl is-active nginx        # active
 ls /opt/wezo                     # active  releases  shared
 ```
@@ -282,7 +282,7 @@ the app, waits for it to report healthy, then points nginx at it.
 
 ```bash
 cat /opt/wezo/active                              # blue or green
-curl -s http://127.0.0.1/api/health | jq
+sudo /opt/wezo/healthcheck.sh
 ```
 
 You want `"ready": true` and a `"version"` matching the release. Then, in a
@@ -369,7 +369,7 @@ serving.
 ```bash
 # what's live and healthy?
 cat /opt/wezo/active
-curl -s http://127.0.0.1/api/health | jq
+sudo /opt/wezo/healthcheck.sh
 
 # watch the app's logs
 journalctl -u "wezo@$(cat /opt/wezo/active)" -f

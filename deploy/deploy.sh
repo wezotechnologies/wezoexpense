@@ -28,6 +28,9 @@
 set -euo pipefail
 
 RELEASE_DIR="${1:-}"
+# Resolved so sibling scripts (healthcheck.sh) are found wherever this copy of
+# the deploy directory was dropped, rather than at a hardcoded path.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="/opt/wezo"
 APP_USER="wezo"
 UPSTREAM_CONF="/etc/nginx/conf.d/wezo-upstream.conf"
@@ -70,6 +73,11 @@ IDLE_PORT="${PORTS[$IDLE]}"
 log "Live colour: $LIVE — deploying onto $IDLE (port $IDLE_PORT)"
 
 # ---------------------------------------------------------------------------
+# Keep a copy somewhere stable. The scripts arrive in /tmp, which does not
+# survive a reboot, and the health check is the first thing anyone reaches for
+# when the site looks wrong.
+sudo install -m 755 "$SCRIPT_DIR/healthcheck.sh" "$APP_ROOT/healthcheck.sh" 2>/dev/null || true
+
 log "Linking the release and its shared secrets"
 ln -sfn "$RELEASE_DIR" "$APP_ROOT/$IDLE"
 # The app reads .env from its working directory as well as from systemd, so a
@@ -159,8 +167,11 @@ ok "traffic now on $IDLE"
 
 # ---------------------------------------------------------------------------
 log "Verifying through nginx"
-public="$(curl -fsS --max-time 5 http://127.0.0.1/api/health 2>/dev/null || true)"
-if echo "$public" | jq -e '.ready == true' >/dev/null 2>&1; then
+# Delegated to healthcheck.sh rather than curling a fixed URL: once TLS is on,
+# port 80 is a redirect-only block and loopback http can no longer answer. This
+# stays a warning — the release has already passed its own health gate on its
+# port, and CI runs the same script as the authoritative check.
+if "$SCRIPT_DIR/healthcheck.sh" "$RELEASE_ID" 2>&1 | sed 's/^/    /'; then
   ok "nginx is serving the new release"
 else
   printf '\033[1;33m  [warn]\033[0m nginx health probe did not confirm; %s is running on :%s\n' "$IDLE" "$IDLE_PORT"
